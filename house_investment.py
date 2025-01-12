@@ -12,9 +12,9 @@ class AnalysisParams:
     initial_rent_price: float
     monthly_net_income: float
     years_of_study: int
-    annual_income_increase: float = 0.03
+    annual_income_increase_percentage: float = 0.03
     initial_monthly_expenses: float = 1200
-    annual_expenses_increase: float = 0.02
+    annual_expenses_increase_percentage: float = 0.025
 
 
 @dataclass
@@ -67,19 +67,23 @@ class HouseInvestment:
     def _calculate_monthly_payment(self, house_price: float, down_payment: float, mortgage_term: int) -> float:
         loan_amount = house_price - down_payment
         n_months = mortgage_term * 12
-        print(f"Monthly payment: {npf.pmt(self.params.mortgage_interest / 12, n_months, -loan_amount)}")
+        # print(f"Monthly payment: {npf.pmt(self.params.mortgage_interest / 12, n_months, -loan_amount)}")
         return npf.pmt(self.params.mortgage_interest / 12, n_months, -loan_amount)
 
     def calculate_value_evolution(
         self, params: AnalysisParams = None
-    ) -> Tuple[List[float], List[float], List[float], List[float], dict]:
+    ) -> Tuple[
+        List[float], List[float], List[float], List[float], List[float], List[float], List[float], List[float], dict
+    ]:
         if params is None:
             params = self.params
 
         down_payment, appraisal_notary = self._calculate_initial_payments(params.house_price)
         initial_payment_total = down_payment + appraisal_notary
         monthly_ownership_costs = self._calculate_monthly_costs(params.house_price)
-        monthly_payment = self._calculate_monthly_payment(params.house_price, down_payment, params.mortgage_term)
+        monthly_morgage_payment = self._calculate_monthly_payment(
+            params.house_price, down_payment, params.mortgage_term
+        )
 
         # Initialize tracking variables
         monthly_income = params.monthly_net_income
@@ -88,34 +92,46 @@ class HouseInvestment:
         rent_price = params.initial_rent_price
 
         # Scenario 1: House purchase
-        house_stock_portfolio = 0  # Start at zero, house value is tracked separately
+        house_stock_portfolio = 0
         # Scenario 2: Rent only
-        rent_stock_portfolio = 0
+        rent_stock_portfolio = initial_payment_total
+
+        rent_stock_portfolio_initial = initial_payment_total
 
         house_values = []
         house_stock_values = []
         rent_stock_values = []
 
-        # Initial investment is reflected in negative net worth
-        total_initial_cost = initial_payment_total
+        # Lists to track yearly values
+        year_month_house_savings = []
+        year_month_rent_savings = []
+        year_month_house_expenses = []
+        year_month_rent_expenses = []
 
         for i in range(params.years_of_study):
+            # Calculate monthly values once per year since they stay constant
+            disposable_income = monthly_income - monthly_expenses
+
+            # Calculate yearly savings for house scenario
+            if i < params.mortgage_term:
+                house_monthly_costs = monthly_morgage_payment + monthly_ownership_costs
+            else:
+                house_monthly_costs = monthly_ownership_costs
+            house_savings = disposable_income - house_monthly_costs
+            year_month_house_savings.append(house_savings)
+
+            # Calculate yearly savings for rent scenario
+            rent_savings = disposable_income - rent_price
+            year_month_rent_savings.append(rent_savings)
+
+            year_month_house_expenses.append(house_monthly_costs + monthly_expenses)
+            year_month_rent_expenses.append(rent_price + monthly_expenses)
+
             for j in range(12):
-                # Calculate monthly savings in both scenarios
-                disposable_income = monthly_income - monthly_expenses
+                print(f"House year {i} - month {j} - savings: {house_savings}")
+                print(f"Rent year {i} - month {j} - savings: {rent_savings}")
 
-                # Scenario 1: House purchase
-                if i < params.mortgage_term:
-                    house_monthly_costs = monthly_payment + monthly_ownership_costs
-                    house_savings = disposable_income - house_monthly_costs
-                else:
-                    house_monthly_costs = monthly_ownership_costs
-                    house_savings = disposable_income - house_monthly_costs
-
-                # Scenario 2: Rent
-                rent_savings = disposable_income - rent_price
-
-                # Update stock portfolios
+                # Update stock portfolios using pre-calculated values
                 house_stock_portfolio += house_savings
                 rent_stock_portfolio += rent_savings
 
@@ -123,9 +139,11 @@ class HouseInvestment:
                 house_stock_portfolio *= 1 + params.stock_market_return / 12
                 rent_stock_portfolio *= 1 + params.stock_market_return / 12
 
+                rent_stock_portfolio_initial *= 1 + params.stock_market_return / 12
             # Yearly updates
-            monthly_income *= 1 + params.annual_income_increase
-            monthly_expenses *= 1 + params.annual_expenses_increase
+            monthly_income *= 1 + params.annual_income_increase_percentage
+            monthly_expenses *= 1 + params.annual_expenses_increase_percentage
+            monthly_ownership_costs *= 1 + params.annual_expenses_increase_percentage
             house_value *= 1 + self.config.annual_house_appreciation
             rent_price *= 1 + self.config.annual_rent_increase
 
@@ -137,8 +155,9 @@ class HouseInvestment:
             combined_values = [h + s for h, s in zip(house_values, house_stock_values)]
 
         # Calculate final net worth for both scenarios
-        house_final_worth = house_values[-1] + house_stock_portfolio - total_initial_cost
+        house_final_worth = house_values[-1] + house_stock_portfolio
         rent_final_worth = rent_stock_values[-1]
+        print(f"Rent stock portfolio initial investment final value: {rent_stock_portfolio_initial}")
 
         financial_details = {
             "house_scenario_net_worth": house_final_worth,
@@ -146,6 +165,20 @@ class HouseInvestment:
             "final_house_value": house_values[-1],
             "house_stock_portfolio": house_stock_values[-1],
             "rent_stock_portfolio": rent_stock_values[-1],
+            "initial_house_savings": year_month_house_savings[0],
+            "initial_rent_savings": year_month_rent_savings[0],
+            "final_house_savings": year_month_house_savings[-1],
+            "final_rent_savings": year_month_rent_savings[-1],
         }
 
-        return house_values, house_stock_values, combined_values, rent_stock_values, financial_details
+        return (
+            house_values,
+            house_stock_values,
+            combined_values,
+            rent_stock_values,
+            year_month_house_savings,
+            year_month_rent_savings,
+            year_month_house_expenses,
+            year_month_rent_expenses,
+            financial_details,
+        )
